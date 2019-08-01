@@ -1,0 +1,9 @@
+.temp/
+
+# Git
+~*
+*.orig
+*.back
+
+# NodeJs
+node_modules/
