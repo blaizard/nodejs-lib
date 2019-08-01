@@ -10,7 +10,7 @@ describe('Template', () => {
 		});
 		it('constructor (wrong arg)', async () => {
 			Exception.assertThrows(() => {
-				new Template(4554);import
+				new Template(4554);
 			});
 		});
 		it('nop', async () => {

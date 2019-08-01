@@ -122,6 +122,11 @@ class Webpack {
 				end: (manifest, config) => {}
 			},
 			/**
+			 * Add custom loaders. For example:
+			 * { irhtml: "./irhtml-loader.js" }
+			 */
+			loaders: {},
+			/**
 			 * User defined arguments that can be used as data for the template for example
 			 */
 			args: {},
@@ -297,6 +302,14 @@ function getWebpackConfigDefault(isDev, config)
 		chunkModules: false
 	};
 
+	const customRules = Object.keys(config.loaders).map((type) => {
+		return {
+			test: new RegExp("\\." + type + "$"),
+			exclude: /node_modules/,
+			loader: config.loaders[type]
+		}
+	});
+
 	return {
 		mode: (isDev) ? "development" : "production",
 		// Reduce verbosity
@@ -315,11 +328,7 @@ function getWebpackConfigDefault(isDev, config)
 			}
 		},
 		module: {
-			rules: [
-				{
-					test: /\.irhtml$/,
-					loader: Path.resolve(__dirname, "irhtml-loader.js")
-				},
+			rules: customRules.concat([
 				{
 					test: /\.vue$/,
 					exclude: /node_modules/,
@@ -360,7 +369,7 @@ function getWebpackConfigDefault(isDev, config)
 						}
 					}
 				}
-			]
+			])
 		},
 		devServer: {
 			// Important, so that we can use HMR while serving file statically
