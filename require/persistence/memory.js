@@ -105,11 +105,6 @@ module.exports = class PersistenceMemory {
 	 * Write new data to the disk
 	 *
 	 * \param type The type of operation. It can be one of the following:
-	 *             - delete Delete an item.
-	 *             - delete-column Remove a column.
-	 *             - add Add an item.
-	 *             - add-column Add a new column.
-	 *             - set Set an element.
 	 */
 	async write(type, ...args) {
 		Exception.assert(this.isReady, "Persistence is not ready yet.");

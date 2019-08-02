@@ -1,7 +1,7 @@
 "use strict";
 
-const Log = require("../log.js")("persistence", "base");
-const Exception = require("../exception.js")("persistence", "base");
+const Log = require("../log.js")("persistence", "disk");
+const Exception = require("../exception.js")("persistence", "disk");
 const Event = require("../event.js");
 const FileSystem = require("../filesystem.js");
 const Mutex = require("../mutex.js");
