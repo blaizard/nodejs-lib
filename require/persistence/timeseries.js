@@ -13,7 +13,8 @@ module.exports = class PersistenceTimeSeries {
 
 	/**
 	 * Find a specific timestamp by binary search.
-	 * If no exact match has been found, return the one after in time (timestamp higher)
+	 * If no exact match has been found, return the one after in time (timestamp higher).
+	 * Note it can return an index out of bound if the latest timestamp is too low.
 	 */
 	find(timestamp) {
 		let indexStart = 0;
@@ -96,5 +97,12 @@ module.exports = class PersistenceTimeSeries {
 			curTimestamp = this.data[index][0];
 		}
 		return true;
+	}
+
+	/**
+	 * Fix consistency issues
+	 */
+	consistencyFix() {
+		this.data.sort((a, b) => (a[0] - b[0])); 
 	}
 }
