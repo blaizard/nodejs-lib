@@ -1,7 +1,7 @@
 "use strict";
 
-const Log = require("./log.js")("persistence", "timeseries");
-const Exception = require("./exception.js")("persistence", "timeseries");
+const Log = require("./log.js")("timeseries");
+const Exception = require("./exception.js")("timeseries");
 
 /**
  * Implementation of a persistent time series
