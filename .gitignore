@@ -2,11 +2,24 @@
 .irapp/
 
 # Git
+
+# NodeJs
+.nyc_output/
+coverage/
+
+# ---- Automatically generated content by irapp -------------------------------
+# Note: everything below this line will be updated
+
+# Git
 ~*
 *.orig
 *.back
 
+# Irapp
+.irapp/*
+!.irapp/assets/
+
 # NodeJs
 node_modules/
-.nyc_output/
-coverage/
+.eslintcache
+.nuxt
