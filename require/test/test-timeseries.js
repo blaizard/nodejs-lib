@@ -1,7 +1,7 @@
 "use strict";
 
 const Exception = require('../exception.js')("test", "timeseries");
-const TimeSeries = require('../persistence/timeseries.js');
+const TimeSeries = require('../timeseries.js');
 
 describe("TimeSeries", () => {
 
