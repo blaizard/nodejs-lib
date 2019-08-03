@@ -1,0 +1,13 @@
+{
+    "repository": "https://github.com/blaizard/nodejs-lib.git", 
+    "devDependencies": {
+        "nyc": "latest", 
+        "eslint": "latest"
+    }, 
+    "dependencies": {
+        "npm": "^6.10.2", 
+        "mocha": "^6.2.0"
+    }, 
+    "description": "NodeJs utilities", 
+    "license": "UNLICENSED"
+}

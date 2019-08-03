@@ -1,0 +1,10 @@
+version: 2
+jobs:
+    build:
+        docker:
+            - image: circleci/python:3.6.5-node
+        steps:
+            - checkout
+            - run: python app.py update
+            - run: python app.py init
+            - run: python app.py test

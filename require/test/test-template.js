@@ -1,7 +1,10 @@
 "use strict";
 
+const Log = require('../log.js')("test", "template");
 const Exception = require('../exception.js')("test", "template");
 const Template = require('../template.js');
+
+Log.mute();
 
 describe('Template', () => {
 	describe('Simple', () => {
