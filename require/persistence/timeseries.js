@@ -8,7 +8,35 @@ const Exception = require("../exception.js")("persistence", "timeseries");
  */
 module.exports = class PersistenceTimeSeries {
 	constructor(options) {
+		this.options = Object.assign({
+			/**
+			 * Only entries with distinct timestamp are allowed.
+			 */
+			unique: false,
+			/**
+			 * Used only if unique is set. It is called to resolve a conflict when 2 or more entries
+			 * with the same timestamp are found, this function purpose is to merge these entries into one
+			 * and return it.
+			 */
+			uniqueMerge: (a, /*b, timestamp*/) => a
+		}, options);
+
+		// Raw data
 		this.data = [];
+	}
+
+	/**
+	 * Return the estimated size in bytes of the structure
+	 */
+	get size() {
+		return 0;
+	}
+
+	/**
+	 * Return the number of elements in the structure
+	 */
+	get length() {
+		return this.data.length;
 	}
 
 	/**
@@ -41,8 +69,15 @@ module.exports = class PersistenceTimeSeries {
 	 * Insert a new element to the series
 	 */
 	insert(timestamp, data) {
-		const indexPrev = this.find(timestamp);
-		this.data.splice(indexPrev, 0, [timestamp, data]);
+		const index = this.find(timestamp);
+		// If the exact timestamp already exists
+		if (this.options.unique && index < this.data.length && this.data[index][0] == timestamp) {
+			const newData = this.options.uniqueMerge(this.data[index][1], data, timestamp);
+			this.data[index][1] = newData;
+		}
+		else {
+			this.data.splice(index, 0, [timestamp, data]);
+		}
 	}
 
 	/**
@@ -91,7 +126,10 @@ module.exports = class PersistenceTimeSeries {
 	consistencyCheck() {
 		let curTimestamp = -Number.MAX_VALUE;
 		for (let index = 0; index < this.data.length; ++index) {
-			if (curTimestamp > this.data[index][0]) {
+			if (!this.options.unique && curTimestamp > this.data[index][0]) {
+				return false;
+			}
+			else if (this.options.unique && curTimestamp >= this.data[index][0]) {
 				return false;
 			}
 			curTimestamp = this.data[index][0];
@@ -103,6 +141,22 @@ module.exports = class PersistenceTimeSeries {
 	 * Fix consistency issues
 	 */
 	consistencyFix() {
-		this.data.sort((a, b) => (a[0] - b[0])); 
+		this.data.sort((a, b) => (a[0] - b[0]));
+
+		// Merge data that share the same timestamp
+		if (this.options.unique) {
+			let indexToDeleteList = [];
+			for (let index = 1; index < this.data.length; ++index) {
+				// If same data is found, merge the data and store it in the current index
+				if (this.data[index - 1][0] == this.data[index][0]) {
+					this.data[index][1] = this.options.uniqueMerge(this.data[index][1], this.data[index - 1][1], this.data[index][0]);
+					indexToDeleteList.push(index - 1);
+				}
+			}
+			// Delete entries from the list
+			indexToDeleteList.reverse().forEach((index) => {
+				this.data.splice(index, 1);
+			});
+		}
 	}
 }
