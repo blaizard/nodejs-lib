@@ -95,10 +95,6 @@ class Webpack {
 			 */
 			type: "html",
 			/**
-			 * Create an index.html file
-			 */
-			indexHtml: "",
-			/**
 			 * Path aliases
 			 */
 			alias: {
@@ -177,7 +173,6 @@ class Webpack {
 					: pathResolve(config, config.assets[key]);
 		});
 		config.output = pathResolve(config, config.output);
-		config.indexHtml = pathResolve(config, config.indexHtml);
 
 		// ---- Handle extra config -------------------------------------------
 		let webpackExtraConfig = {};
@@ -222,14 +217,6 @@ class Webpack {
 
 		default:
 			throw new Exception("Unsupported config type \"" + config.type + "\"");
-		}
-
-		// ---- indexHtml -----------------------------------------------------
-		if (config.indexHtml) {
-			config.templates.push({
-				output: Path.resolve(config.output, "index.html"),
-				template: config.indexHtml
-			});
 		}
 
 		// ---- Build webpack config ------------------------------------------
@@ -433,6 +420,19 @@ function getWebpackConfigDefault(isDev, config)
 							const data = await readFileAsync(configTemplate.template);
 							const template = new Template(data);
 
+							// Pre-process HTML specific entries
+							let html = {};
+							if (configTemplate.entryId) {
+								// Create the dependency list
+								const cssList = (manifest.common.css || []).concat(manifest.entries[configTemplate.entryId].css || []);
+								const jsList = (manifest.common.js || []).concat(manifest.entries[configTemplate.entryId].js || []);
+								html = {
+									base: manifest.path.split("/").filter((entry) => (entry && entry != "/")).map((entry) => "..").join("/"),
+									css: cssList.map((path) => ("<link href=\"" + manifest.path + path + "\" rel=\"stylesheet\"/>")).join(""),
+									js: jsList.map((path) => ("<script src=\"" + manifest.path + path + "\"></script>")).join("")
+								}
+							}
+
 							// Generate the template
 							const output = template.process({
 								manifest: manifest,
@@ -440,7 +440,11 @@ function getWebpackConfigDefault(isDev, config)
 								/**
 								 * The current configuration object
 								 */
-								config: config
+								config: config,
+								/**
+								 * HTML specific parameters if needed
+								 */
+								html: html
 							});
 
 							await writeFileAsync(configTemplate.output, output);
