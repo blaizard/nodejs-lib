@@ -26,6 +26,22 @@ module.exports = class PersistenceTimeSeries {
 	}
 
 	/**
+	 * Use a specific data object
+	 */
+	wrap(data) {
+		this.data = data;
+	}
+
+	/**
+	 * Un-use and return the current data object
+	 */
+	unwrap() {
+		const data = this.data;
+		this.data = [];
+		return data;
+	}
+
+	/**
 	 * Return the estimated size in bytes of the structure
 	 */
 	get size() {
