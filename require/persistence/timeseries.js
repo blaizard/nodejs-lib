@@ -24,7 +24,13 @@ module.exports = class PersistenceTimeSeries {
 			 * The directory name where the actual data should be stored.
 			 * This directory is relative to the file being opened.
 			 */
-			dataDir: "%s-data"
+			dataDir: "%s-data",
+			/**
+			 * Default periodic savepoint task
+			 */
+			savepointTask: {
+				intervalMs: 5000 * 60 // 5min by default
+			}
 		}, options);
 
 		this.event = new Event({
@@ -54,23 +60,6 @@ module.exports = class PersistenceTimeSeries {
 		this.initialize(path);
 	}
 
-	getPersistenceOptions(timeSeries) {
-		return {
-			initial: {list:[]},
-			operations: {
-				insert: (data, timestamp, value) => {
-					try {
-						timeSeries.wrap(data.list);
-						timeSeries.insert(timestamp, value);
-					}
-					finally {
-						timeSeries.unwrap();
-					}
-				}
-			}
-		}
-	}
-
 	/**
 	 * Initialize the persistence
 	 */
@@ -89,14 +78,55 @@ module.exports = class PersistenceTimeSeries {
 		await persistence.write("insert", timestamp, data);
 	}
 
-	async forEach(callback, timestamp) {
+	/**
+	 * Loop through the data.
+	 * 
+	 * \param callback The function to be called for each entry.
+	 * \param timestampStart The starting timestamp. If omitted, it will start at the begining
+	 * \param timestampEnd The ending timestamp. If omitted, it will go until the end.
+	 * \param inclusive Used only if the timestamps do not match anything. If set to true, previous
+	 * and next timestamp will be included. Otherwise not.
+	 * 
+	 * \todo support for each over files
+	 */
+	async forEach(callback, timestampStart, timestampEnd, inclusive) {
+
+		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
 		let persistence = await this.getPersistence(timestamp);
 		try {
 			this.timeSeriesData.wrap((await persistence.get()).list);
-			this.timeSeriesData.forEach(callback);
+			this.timeSeriesData.forEach(callback, timestamp, timestampEnd, inclusive);
 		}
 		finally {
 			this.timeSeriesData.unwrap();
+		}
+	}
+
+	/**
+	 * This function waits until the persistence is ready
+	 */
+	async waitReady() {
+		await this.persistenceIndex.waitReady();
+		return this.event.waitUntil("ready");
+	}
+
+	// ---- private methods ---------------------------------------------------
+
+	getPersistenceOptions(timeSeries) {
+		return {
+			initial: {list:[]},
+			operations: {
+				insert: (data, timestamp, value) => {
+					try {
+						timeSeries.wrap(data.list);
+						timeSeries.insert(timestamp, value);
+					}
+					finally {
+						timeSeries.unwrap();
+					}
+				}
+			},
+			savepointTask: this.options.savepointTask
 		}
 	}
 
@@ -108,6 +138,8 @@ module.exports = class PersistenceTimeSeries {
 
 		// Load the persistence if not alreay loaded
 		if (!this.persistenceCache.hasOwnProperty(path)) {
+			Log.info("Loading time series from " + path);
+
 			await FileSystem.mkdir(this.options.dataDir);
 			const fullPath = Path.join(this.options.dataDir, path);
 			this.persistenceCache[path] = new Persistence(fullPath, this.getPersistenceOptions(this.timeSeriesData));
@@ -128,13 +160,5 @@ module.exports = class PersistenceTimeSeries {
 		finally {
 			this.timeSeriesIndex.unwrap();
 		}
-	}
-
-	/**
-	 * This function waits until the persistence is ready
-	 */
-	async waitReady() {
-		await this.persistenceIndex.waitReady();
-		return this.event.waitUntil("ready");
 	}
 }

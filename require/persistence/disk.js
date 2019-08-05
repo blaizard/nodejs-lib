@@ -5,6 +5,7 @@ const Exception = require("../exception.js")("persistence", "disk");
 const Event = require("../event.js");
 const FileSystem = require("../filesystem.js");
 const Mutex = require("../mutex.js");
+const TaskManager = require("../task/manager-singleton.js");
 
 /**
  * This module is responsible for keeping the data consistent and persistent.
@@ -61,6 +62,10 @@ module.exports = class PersistenceDisk {
 				}
 			},
 			/**
+			 * If set, this will create a task to perform a periodic savepoint.
+			 */
+			savepointTask: null,
+			/**
 			 * \brief Perform a savepoint when the close function is called
 			 */
 			savepointOnClose: true,
@@ -85,6 +90,8 @@ module.exports = class PersistenceDisk {
 		this.estimatedSize = 0;
 		// The version is to ensure consitency while creating the savepoint
 		this.savepointVersion = 0;
+		// Task ID of the periodic savepoint if any
+		this.savepointTaskId = null;
 
 		// The persistence needs to be initialized
 		this.isInitialized = false;
@@ -111,12 +118,38 @@ module.exports = class PersistenceDisk {
 		// initializing both the deltas and the datas.
 		await this.mutex.lock();
 
+		Exception.assert(!this.savepointTaskId, "A task ID of the periodic task is already created.");
+
 		try {
 			// Initialize the delta files
 			this.delta = await this.initializeDelta(ignoreErrors);
 			// Only if everything went well, set the ready flag
 			this.isReady = true;
 			this.event.trigger("ready");
+
+			// Set the periodic savepoint if needed
+			if (this.options.savepointTask !== null) {
+
+				const taskConfig = Object.assign({
+					/**
+					 * Default namespace for the periodic savepoint, used for the
+					 * periodic task.
+					 */
+					namespace: "persistence-disk",
+					/**
+					 * Default name for the periodic savepoint, used for the
+					 * periodic task.
+					 */
+					name: this.path,
+					/**
+					 * Task interval in Ms
+					 */
+					intervalMs: 0,
+					isValid: (iteration) => this.isReady
+				}, this.options.savepointTask);
+
+				this.savepointTaskId = TaskManager.register(taskConfig.namespace, taskConfig.name, () => this.taskSavepoint(), taskConfig);
+			}
 		}
 		catch (e) {
 			Exception.fromError(e).print("Error while initializing data");
@@ -200,6 +233,13 @@ module.exports = class PersistenceDisk {
 	 * \brief Close the persistence
 	 */
 	async close() {
+
+		// Unregister the current task
+		if (this.options.savepointTask !== null) {
+			Exception.assert(this.savepointTaskId, "The task ID for the periodic savepoint");
+			TaskManager.unregister(this.savepointTaskId);
+			this.savepointTaskId = null;
+		}
 
 		// Perform a savepoint if needed
 		if (this.options.savepointOnClose) {
