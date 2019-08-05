@@ -56,6 +56,26 @@ module.exports = class PersistenceTimeSeries {
 	}
 
 	/**
+	 * Get a known timestamp value.
+	 * 
+	 * \param index A positive value will return the timestamp stating from the begning
+	 * with an offset eequal to the index. A negative value, will return the timestamp
+	 * from the end.
+	 * For example, 0 will return the oldest timestamp while -1 will return the newest.
+	 * 
+	 * \return The timestamp or null if out of bound.
+	 */
+	getTimestamp(index) {
+		if (index >= 0 && index < this.data.length) {
+			return this.data[index][0];
+		}
+		else if (index < 0 && -index <= this.data.length) {
+			return this.data[this.data.length + index][0];
+		}
+		return null;
+	}
+
+	/**
 	 * Find a specific timestamp by binary search.
 	 * If no exact match has been found, return the one after in time (timestamp higher).
 	 * Note it can return an index out of bound if the latest timestamp is too low.

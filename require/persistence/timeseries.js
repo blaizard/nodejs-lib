@@ -74,7 +74,7 @@ module.exports = class PersistenceTimeSeries {
 	 * Insert a new data point
 	 */
 	async insert(timestamp, data) {
-		let persistence = await this.getPersistence(timestamp);
+		let persistence = await this.getPersistenceByTimestamp(timestamp);
 		await persistence.write("insert", timestamp, data);
 	}
 
@@ -92,10 +92,31 @@ module.exports = class PersistenceTimeSeries {
 	async forEach(callback, timestampStart, timestampEnd, inclusive) {
 
 		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
-		let persistence = await this.getPersistence(timestamp);
+		let persistence = await this.getPersistenceByTimestamp(timestamp);
 		try {
 			this.timeSeriesData.wrap((await persistence.get()).list);
 			this.timeSeriesData.forEach(callback, timestamp, timestampEnd, inclusive);
+		}
+		finally {
+			this.timeSeriesData.unwrap();
+		}
+	}
+
+	/**
+	 * Get a known timestamp value.
+	 * 
+	 * \param index A positive value will return the timestamp stating from the begning
+	 * with an offset eequal to the index. A negative value, will return the timestamp
+	 * from the end.
+	 * For example, 0 will return the oldest timestamp while -1 will return the newest.
+	 * 
+	 * \return The timestamp or null if out of bound.
+	 */
+	async getTimestamp(index) {
+		let persistence = await this.getPersistenceByIndex(index);
+		try {
+			this.timeSeriesData.wrap((await persistence.get()).list);
+			return this.timeSeriesData.getTimestamp(index);
 		}
 		finally {
 			this.timeSeriesData.unwrap();
@@ -133,7 +154,7 @@ module.exports = class PersistenceTimeSeries {
 	/**
 	 * Return and create if necessary the persistence associated with this timestamp
 	 */
-	async getPersistence(timestamp) {
+	async getPersistenceByTimestamp(timestamp) {
 		const path = await this.getDataFile(timestamp);
 
 		// Load the persistence if not alreay loaded
@@ -147,6 +168,15 @@ module.exports = class PersistenceTimeSeries {
 		}
 
 		return this.persistenceCache[path];
+	}
+
+	/**
+	 * \brief Get the persistence from a specific index
+	 * 
+	 * \todo fix!
+	 */
+	async getPersistenceByIndex(index) {
+		return await this.getPersistenceByTimestamp(0);
 	}
 
 	/**

@@ -203,8 +203,6 @@ module.exports = class Web {
 	 */
 	addRoute(type, uri, callback, dataType, options) {
 
-		let callbackList = [callback, middlewareErrorHandler];
-
 		if (typeof dataType === "undefined") {
 			dataType = Web.NORMAL;
 		}
@@ -212,8 +210,29 @@ module.exports = class Web {
 		// Update the options
 		options = Object.assign({
 			limit: this.config.limit,
-			path: null
+			path: null,
+			/**
+			 * Add guards to unhandled exceptions. This adds a callstack layer.
+			 */
+			exceptionGuard: false
 		}, options);
+
+		let callbackList = [middlewareErrorHandler];
+
+		if (options.exceptionGuard) {
+			callbackList.unshift(async function(request, response) {
+				try {
+					await callback.call(this, request, response);
+				}
+				catch (e) {
+					Exception.print("Exception Guard", e);
+					response.status(500).send(e.message);
+				}
+			});
+		}
+		else {
+			callbackList.unshift(callback);
+		}
 
 		if (dataType & Web.JSON) {
 			callbackList.unshift(BodyParser.urlencoded({ limit: options.limit, extended: true }));
