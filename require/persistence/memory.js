@@ -88,6 +88,13 @@ module.exports = class PersistenceMemory {
 	}
 
 	/**
+	 * Check if persistence is ready
+	 */
+	isReady() {
+		return this.event.is("ready");
+	}
+
+	/**
 	 * Wait until all previous operations are completed
 	 */
 	async waitSync() {

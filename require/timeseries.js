@@ -28,17 +28,15 @@ module.exports = class PersistenceTimeSeries {
 	/**
 	 * Use a specific data object
 	 */
-	wrap(data) {
-		this.data = data;
-	}
-
-	/**
-	 * Un-use and return the current data object
-	 */
-	unwrap() {
-		const data = this.data;
-		this.data = [];
-		return data;
+	async wrap(data, callback) {
+		const dataSaved = this.data;
+		try {
+			this.data = data;
+			return await callback(this);
+		}
+		finally {
+			this.data = dataSaved;
+		}
 	}
 
 	/**

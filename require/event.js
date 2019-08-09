@@ -28,7 +28,7 @@ module.exports = class Event {
 	 * \param callback The function to be called when the event is triggered
 	 * \param once If the event is intended to be fired only once
 	 */
-	on(id, callback, once) {
+	on (id, callback, once) {
 		let addToList = true;
 
 		// Handle proactive events
@@ -42,6 +42,17 @@ module.exports = class Event {
 			this.list[id].push([callback, once]);
 		}
 		return this;
+	}
+
+	/**
+	 * \brief Check if an event is active (only for proactive events)
+	 * 
+	 * \param id The identifier of the events to be triggered
+	 * 
+	 * \return true if the evetn has been triggered, false otherwise.
+	 */
+	is (id) {
+		return (typeof this.proactive[id] !== "undefined");
 	}
 
 	/**

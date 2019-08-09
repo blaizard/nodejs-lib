@@ -8,6 +8,8 @@ const FileSystem = require("../filesystem.js");
 const Persistence = require("./disk.js");
 const TimeSeries = require("../timeseries.js");
 
+const VERSION = 1;
+
 /**
  * Persist a timeseries data structure
  */
@@ -66,7 +68,13 @@ module.exports = class PersistenceTimeSeries {
 	async initialize(path) {
 
 		// Load the index
-		this.persistenceIndex = new Persistence(path, this.getPersistenceOptions(this.timeSeriesIndex));
+		this.persistenceIndex = new Persistence(path, this.getPersistenceOptions(/*readonly*/false, this.timeSeriesIndex));
+		await this.persistenceIndex.waitReady();
+		// Quick check to see if the index need to be rebuilt
+		if ((await this.persistenceIndex.get()).version != VERSION || true) {
+			await this.rebuildIndex();
+			Log.info("Successfully rebuilt index of timeseries " + path);
+		}
 		this.event.trigger("ready");
 	}
 
@@ -93,13 +101,9 @@ module.exports = class PersistenceTimeSeries {
 
 		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
 		let persistence = await this.getPersistenceByTimestamp(timestamp);
-		try {
-			this.timeSeriesData.wrap((await persistence.get()).list);
-			this.timeSeriesData.forEach(callback, timestamp, timestampEnd, inclusive);
-		}
-		finally {
-			this.timeSeriesData.unwrap();
-		}
+		await this.timeSeriesData.wrap((await persistence.get()).list, (timeseries) => {
+			timeseries.forEach(callback, timestamp, timestampEnd, inclusive);
+		});
 	}
 
 	/**
@@ -114,13 +118,9 @@ module.exports = class PersistenceTimeSeries {
 	 */
 	async getTimestamp(index) {
 		let persistence = await this.getPersistenceByIndex(index);
-		try {
-			this.timeSeriesData.wrap((await persistence.get()).list);
-			return this.timeSeriesData.getTimestamp(index);
-		}
-		finally {
-			this.timeSeriesData.unwrap();
-		}
+		return await this.timeSeriesData.wrap((await persistence.get()).list, (timeseries) => {
+			return timeseries.getTimestamp(index);
+		});
 	}
 
 	/**
@@ -133,41 +133,113 @@ module.exports = class PersistenceTimeSeries {
 
 	// ---- private methods ---------------------------------------------------
 
-	getPersistenceOptions(timeSeries) {
-		return {
-			initial: {list:[]},
+	/**
+	 * Rebuild the index in case of corruption, or migration.
+	 */
+	async rebuildIndex() {
+		Log.info("Re-building index, this might take a while...");
+		// List all data files
+		const dataFileList = (await FileSystem.exists(this.options.dataDir)) ? await FileSystem.readdir(this.options.dataDir) : [];
+
+		// Get the metadata out of them
+		let timeseriesData = [];
+		await this.timeSeriesIndex.wrap(timeseriesData, async (timeSeriesIndex) => {
+
+			for (const i in dataFileList) {
+				const fullPath = Path.join(this.options.dataDir, dataFileList[i]);
+				if (!(await FileSystem.stat(fullPath)).isFile()) {
+					continue;
+				}
+
+				let persistence = null;
+				try {
+					// Open the persistence
+					persistence = await new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/true));
+					await persistence.waitReady();
+					// Read some metadata
+					let timestampBegin = Number.MAX_VALUE;
+					let timestampLength = 0;
+					await this.timeSeriesData.wrap((await persistence.get()).list, (timeSeriesData) => {
+
+						Exception.assert(timeSeriesData.consistencyCheck(), "Data file '" + fullPath + "' is not consistent");
+
+						timestampBegin = timeSeriesData.getTimestamp(0);
+						timestampLength = timeSeriesData.length;
+
+						// Inset the data
+						timeSeriesIndex.insert(timestampBegin, {
+							path: dataFileList[i],
+							length: timestampLength
+						});
+					});
+				}
+				catch (e) {
+					Log.error("Ignoring data file '" + fullPath + "' seems to be corrupted: " + e);
+				}
+				finally {
+					// Close the persistence
+					await persistence.close();
+				}
+			}
+		});
+
+		// Write some statistics
+		Log.info("Identified " + timeseriesData.length + " file(s)");
+
+		// Build index full content
+		const indexContent = {
+			version: VERSION,
+			list: timeseriesData
+		};
+		// Reset the index persistence with this content
+		await this.persistenceIndex.reset(indexContent);
+		await this.persistenceIndex.waitReady();
+	}
+
+	getPersistenceOptions(readonly, timeSeries) {
+
+		let options = {
+			initial: {list:[]}
+		};
+
+		if (readonly) {
+			return options;
+		}
+		return Object.assign(options, {
 			operations: {
-				insert: (data, timestamp, value) => {
-					try {
-						timeSeries.wrap(data.list);
-						timeSeries.insert(timestamp, value);
-					}
-					finally {
-						timeSeries.unwrap();
-					}
+				insert: async (data, timestamp, value) => {
+					await timeSeries.wrap(data.list, (t) => {
+						t.insert(timestamp, value);
+					});
 				}
 			},
 			savepointTask: this.options.savepointTask
-		}
+		});
 	}
 
 	/**
 	 * Return and create if necessary the persistence associated with this timestamp
 	 */
 	async getPersistenceByTimestamp(timestamp) {
-		const path = await this.getDataFile(timestamp);
+		const metadata = await this.getMetadata(timestamp);
 
 		// Load the persistence if not alreay loaded
-		if (!this.persistenceCache.hasOwnProperty(path)) {
-			Log.info("Loading time series from " + path);
+		if (!this.persistenceCache.hasOwnProperty(metadata.path)) {
+			Log.info("Loading time series from " + metadata.path);
 
 			await FileSystem.mkdir(this.options.dataDir);
-			const fullPath = Path.join(this.options.dataDir, path);
-			this.persistenceCache[path] = new Persistence(fullPath, this.getPersistenceOptions(this.timeSeriesData));
-			await this.persistenceCache[path].waitReady();
+			const fullPath = Path.join(this.options.dataDir, metadata.path);
+			let persistence = new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/false, this.timeSeriesData));
+			await persistence.waitReady();
+
+			this.persistenceCache[metadata.path] = persistence;
 		}
 
-		return this.persistenceCache[path];
+		Exception.assert(this.persistenceCache.hasOwnProperty(metadata.path), "Persistence " + metadata.path + " does not exists");
+		Exception.assert(this.persistenceCache[metadata.path] instanceof Persistence, "Persistence " + metadata.path + " is not of Persistence type");
+		Exception.assert(this.persistenceCache[metadata.path].isReady(), "Persistence " + metadata.path + " is not ready");
+
+		return this.persistenceCache[metadata.path];
 	}
 
 	/**
@@ -180,15 +252,29 @@ module.exports = class PersistenceTimeSeries {
 	}
 
 	/**
+	 * Create a new entry in the index file and return its metadata
+	 */
+	async createIndexEntry(timestamp) {
+		const metadata = {
+			length: 0,
+			path: timestamp + ".json"
+		};
+		await this.persistenceIndex.write("insert", timestamp, metadata);
+		return metadata;
+	}
+
+	/**
 	 * Get the current data file path for this timestamp
 	 */
-	async getDataFile(timestamp) {
-		try {
-			this.timeSeriesIndex.wrap(await this.persistenceIndex.get());
-			return "all.json";
-		}
-		finally {
-			this.timeSeriesIndex.unwrap();
-		}
+	async getMetadata(timestamp) {
+		return await this.timeSeriesIndex.wrap((await this.persistenceIndex.get()).list, async (timeSeriesIndex) => {
+			// Look for the entry
+			const index = timeSeriesIndex.find(timestamp) - 1;
+			// No entries, then create one or get the exisiting one
+			const metadata = (index == -1) ? await this.createIndexEntry(timestamp) : timeSeriesIndex.data[index];
+			return Object.assign(metadata, {
+				timestamp: timestamp
+			});
+		});
 	}
 }

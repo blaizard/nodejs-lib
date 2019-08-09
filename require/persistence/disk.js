@@ -81,7 +81,6 @@ module.exports = class PersistenceDisk {
 		this.path = path;
 		this.mutex = new Mutex();
 		this.isSavepoint = false;
-		this.isReady = false;
 		this.event = new Event({
 			ready: {proactive: true},
 			error: {proactive: true}
@@ -124,7 +123,6 @@ module.exports = class PersistenceDisk {
 			// Initialize the delta files
 			this.delta = await this.initializeDelta(ignoreErrors);
 			// Only if everything went well, set the ready flag
-			this.isReady = true;
 			this.event.trigger("ready");
 
 			// Set the periodic savepoint if needed
@@ -145,7 +143,7 @@ module.exports = class PersistenceDisk {
 					 * Task interval in Ms
 					 */
 					intervalMs: 0,
-					isValid: (iteration) => this.isReady
+					isValid: (iteration) => { return this.isReady() }
 				}, this.options.savepointTask);
 
 				this.savepointTaskId = TaskManager.register(taskConfig.namespace, taskConfig.name, () => this.taskSavepoint(), taskConfig);
@@ -247,7 +245,7 @@ module.exports = class PersistenceDisk {
 		}
 
 		// Mark as not ready anymore
-		this.isReady = false;
+		this.event.clear("ready");
 	}
 
 	/**
@@ -277,7 +275,6 @@ module.exports = class PersistenceDisk {
 			// is currently running with the old data, it will be discarded.
 			this.savepointVersion++;
 			// Only if everything went well, set the ready flag
-			this.isReady = true;
 			this.event.trigger("ready");
 		}
 		catch (e) {
@@ -293,7 +290,14 @@ module.exports = class PersistenceDisk {
 	 * This function waits until the persistence is ready
 	 */
 	async waitReady() {
-		return this.event.waitUntil("ready");
+		return await this.event.waitUntil("ready");
+	}
+
+	/**
+	 * Check if persistence is ready
+	 */
+	isReady() {
+		return this.event.is("ready");
 	}
 
 	/**
@@ -308,7 +312,7 @@ module.exports = class PersistenceDisk {
 	 * \brief Create a new delta file and returns its ID.
 	 */
 	async createDeltaNoLock() {
-		Exception.assert(this.isReady, "Persistence is not ready yet.");
+		Exception.assert(this.isReady(), "Persistence is not ready yet.");
 
 		// Allocate a new Id
 		let newId = (this.delta.list.length) ? (this.delta.list[this.delta.list.length - 1] + 1) : 0;
@@ -336,7 +340,7 @@ module.exports = class PersistenceDisk {
 	 * \brief Return the latest version of the data persisted.
 	 */
 	async get() {
-		Exception.assert(this.isReady, "Persistence is not ready yet");
+		Exception.assert(this.isReady(), "Persistence is not ready yet");
 
 		// If not in sync, load the persistence
 		if (!this.isInitialized) {
@@ -362,7 +366,7 @@ module.exports = class PersistenceDisk {
 		let data = null;
 		try {
 			// Ensure the persistence is ready
-			Exception.assert(this.isReady, "Persistence is not ready yet");
+			Exception.assert(this.isReady(), "Persistence is not ready yet");
 
 			let deltaPath = await this.getDeltaPath();
 
@@ -440,7 +444,7 @@ module.exports = class PersistenceDisk {
 	 * \biref Tells if the perisitence is dirty (hence if it might need a savepoint)
 	 */
 	isDirty() {
-		Exception.assert(this.isReady, "Persistence is not ready yet");
+		Exception.assert(this.isReady(), "Persistence is not ready yet");
 		return this.delta.dirty;
 	}
 
@@ -463,7 +467,7 @@ module.exports = class PersistenceDisk {
 	 * \brief Write the latest version of the data.
 	 */
 	async savepoint() {
-		Exception.assert(this.isReady, "Persistence is not ready yet");
+		Exception.assert(this.isReady(), "Persistence is not ready yet");
 
 		// If another savepoint is on-going, cancel
 		if (this.isSavepoint) {
@@ -581,7 +585,7 @@ module.exports = class PersistenceDisk {
 	 */
 	replaceDataNoLock(tempPath, lastId) {
 
-		Exception.assert(this.isReady, "Persistence is not ready yet.");
+		Exception.assert(this.isReady(), "Persistence is not ready yet.");
 
 		return new Promise(async (resolve, reject) => {
 
@@ -639,7 +643,7 @@ module.exports = class PersistenceDisk {
 	 * the content is consistent.
 	 */
 	async consistencyCheck() {
-		Exception.assert(this.isReady, "Persistence is not ready yet.");
+		Exception.assert(this.isReady(), "Persistence is not ready yet.");
 
 		// Make sure that the content in the list is the same
 		// as the content on the directory

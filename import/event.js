@@ -45,6 +45,17 @@ export default class Event {
 	}
 
 	/**
+	 * \brief Check if an event is active (only for proactive events)
+	 * 
+	 * \param id The identifier of the events to be triggered
+	 * 
+	 * \return true if the evetn has been triggered, false otherwise.
+	 */
+	is (id) {
+		return (typeof this.proactive[id] !== "undefined");
+	}
+
+	/**
 	 * \brief Trigger all events associated with a specific id
 	 *
 	 * \param id The identifier of the events to be triggered
