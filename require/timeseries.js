@@ -138,10 +138,7 @@ module.exports = class TimeSeries {
 			timestampEnd = this.data[this.data.length - 1][0];
 		}
 
-		let index = this.find_(timestampStart);
-		if (this.data[index][0] != timestampStart && inclusive == true && index > 0) {
-			--index;
-		}
+		let index = this.find(timestampStart, (inclusive) ? TimeSeries.FIND_IMMEDIATELY_BEFORE : TimeSeries.FIND_IMMEDIATELY_AFTER);
 		let prevTimestamp = -Number.MAX_VALUE;
 		for (; index < this.data.length; ++index) {
 			if (timestampEnd < this.data[index][0]) {

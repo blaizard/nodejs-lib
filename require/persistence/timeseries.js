@@ -8,7 +8,7 @@ const FileSystem = require("../filesystem.js");
 const Persistence = require("./disk.js");
 const TimeSeries = require("../timeseries.js");
 
-const VERSION = 1;
+const VERSION = 2;
 
 /**
  * Persist a timeseries data structure
@@ -32,7 +32,11 @@ module.exports = class PersistenceTimeSeries {
 			 */
 			savepointTask: {
 				intervalMs: 5000 * 60 // 5min by default
-			}
+			},
+			/**
+			 * Maximum number of entries before spliting files
+			 */
+			maxEntriesPerFile: 10
 		}, options);
 
 		this.event = new Event({
@@ -85,7 +89,7 @@ module.exports = class PersistenceTimeSeries {
 	
 		let result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/true);
 		await result.persistence.write("insert", timestamp, data);
-		await this.persistenceIndex.write("increaseLength", timestamp);
+		await this.persistenceIndex.write("update", timestamp);
 	}
 
 	/**
@@ -112,15 +116,19 @@ module.exports = class PersistenceTimeSeries {
 		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
 		timestamp = Math.max(timestamp, await this.getTimestamp(0));
 
+		timestampEnd = await this.getTimestamp(-1);
+
 		// Loop through the entries
+		let isFirst = true;
 		do {
-			const result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/false);
+			const result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/false, (isFirst) ? TimeSeries.FIND_IMMEDIATELY_BEFORE : TimeSeries.FIND_IMMEDIATELY_AFTER);
+			isFirst = false;
 			const lastValidTimestamp = await this.timeSeriesData.wrap((await result.persistence.get()).list, (timeseries) => {
 				timeseries.forEach(callback, timestamp, timestampEnd, inclusive);
 				return timeseries.getTimestamp(-1);
 			});
 			// Check if it needs to continue
-			timestamp = (timestamp > lastValidTimestamp) ? (lastValidTimestamp + 1) : null;
+			timestamp = (timestampEnd > lastValidTimestamp) ? lastValidTimestamp : null;
 		} while (timestamp != null);
 	}
 
@@ -161,7 +169,23 @@ module.exports = class PersistenceTimeSeries {
 	async rebuildIndex() {
 		Log.info("Re-building index, this might take a while...");
 		// List all data files
-		const dataFileList = (await FileSystem.exists(this.options.dataDir)) ? await FileSystem.readdir(this.options.dataDir) : [];
+		const fileList = (await FileSystem.exists(this.options.dataDir)) ? await FileSystem.readdir(this.options.dataDir) : [];
+
+		// Create the list of data file
+		let dataFileList = new Set();
+		for (const i in fileList) {
+			const fullPath = Path.join(this.options.dataDir, fileList[i]);
+			const stat = await FileSystem.stat(fullPath);
+			if (stat.isFile()) {
+				dataFileList.add(fileList[i]);
+			}
+			else if (stat.isDirectory() && fileList[i].match(/^.+\.delta$/)) {
+				dataFileList.add(fileList[i].replace(/\.delta$/, ""));
+			}
+		}
+		dataFileList = Array.from(dataFileList);
+
+		Log.info("Identified " + dataFileList.length + " data file(s)");
 
 		// Get the metadata out of them
 		let timeseriesData = [];
@@ -169,29 +193,25 @@ module.exports = class PersistenceTimeSeries {
 
 			for (const i in dataFileList) {
 				const fullPath = Path.join(this.options.dataDir, dataFileList[i]);
-				if (!(await FileSystem.stat(fullPath)).isFile()) {
-					continue;
-				}
-
 				let persistence = null;
 				try {
 					// Open the persistence
 					persistence = await new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/true, this.timeSeriesData));
 					await persistence.waitReady();
 					// Read some metadata
-					let timestampBegin = Number.MAX_VALUE;
-					let timestampLength = 0;
 					await this.timeSeriesData.wrap((await persistence.get()).list, (timeSeriesData) => {
 
 						Exception.assert(timeSeriesData.consistencyCheck(), "Data file '" + fullPath + "' is not consistent");
 
-						timestampBegin = timeSeriesData.getTimestamp(0);
-						timestampLength = timeSeriesData.length;
+						const timestampBegin = timeSeriesData.getTimestamp(0);
+						const timestampEnd = timeSeriesData.getTimestamp(-1);
+						const timestampLength = timeSeriesData.length;
 
 						// Inset the data
 						timeSeriesIndex.insert(timestampBegin, {
 							path: dataFileList[i],
-							length: timestampLength
+							length: timestampLength,
+							timestampEnd: timestampEnd
 						});
 					});
 				}
@@ -204,9 +224,6 @@ module.exports = class PersistenceTimeSeries {
 				}
 			}
 		});
-
-		// Write some statistics
-		Log.info("Identified " + timeseriesData.length + " file(s)");
 
 		// Build index full content
 		const indexContent = {
@@ -228,12 +245,18 @@ module.exports = class PersistenceTimeSeries {
 						t.insert(timestamp, value);
 					});
 				},
-				increaseLength: async (data, timestamp) => {
+				update: async (data, timestamp) => {
 					await timeSeries.wrap(data.list, (t) => {
 						const index = t.find(timestamp, TimeSeries.FIND_IMMEDIATELY_BEFORE);
+
+						// Increase the length
 						Exception.assert(typeof t.data[index] == "object", () => ("Cannot find timestamp " + timestamp + " in index, returned index: " + index + " " + JSON.stringify(t.data)));
-						Exception.assert(t.data[index].hasOwnProperty("length"), "No length property for index entry " + index);
-						++(t.data[index].length);
+						Exception.assert(t.data[index][1].hasOwnProperty("length"), "No length property for index entry " + index);
+						++(t.data[index][1].length);
+
+						// Update the timestampEnd field
+						Exception.assert(t.data[index][1].hasOwnProperty("timestampEnd"), () => ("No timestampEnd property for index entry " + index + "  " + JSON.stringify(t.data[index])));
+						t.data[index][1].timestampEnd = Math.max(t.data[index][1].timestampEnd, timestamp);
 					});
 				}
 			}
@@ -252,13 +275,14 @@ module.exports = class PersistenceTimeSeries {
 	 * 
 	 * \param timestamp The timestamp associated with the persistence to be opened
 	 * \param forWrite Optional, Open the persistence for write (or create one if needed)
+	 * \param mode The search mode if no exact match.
 	 * 
 	 * \return A structure containing the persistence and the metadata;
 	 */
-	async getPersistenceByTimestamp(timestamp, forWrite = false) {
+	async getPersistenceByTimestamp(timestamp, forWrite = false, mode = TimeSeries.FIND_IMMEDIATELY_BEFORE) {
 		Exception.assert(typeof timestamp == "number", "Timestamp passed to getPersistenceByTimestamp is not a number: " + timestamp);
 
-		const metadata = await this.getMetadata(timestamp, forWrite);
+		const metadata = await this.getMetadata(timestamp, forWrite, mode);
 		Exception.assert(metadata, "Metadata returned for " + timestamp + " is evaluating to false");
 
 		// Load the persistence if not alreay loaded
@@ -339,7 +363,8 @@ module.exports = class PersistenceTimeSeries {
 	async createIndexEntry(timestamp) {
 		const metadata = {
 			length: 0,
-			path: timestamp + ".json"
+			path: timestamp + ".json",
+			timestampEnd: 0
 		};
 		await this.persistenceIndex.write("insert", timestamp, metadata);
 		return metadata;
@@ -352,28 +377,38 @@ module.exports = class PersistenceTimeSeries {
 	 * 
 	 * \param timestamp The timestamp associated with the metadata the user wants to acquired.
 	 * \param forWrite If set, it will create a file if needed. If not set, it needs to ensure that the timestamp is valid.
+	 * \param mode The search mode if no exact match.
 	 * 
 	 * \return The metadata including the timestamp of the file.
 	 */
-	async getMetadata(timestamp, forWrite) {
+	async getMetadata(timestamp, forWrite, mode = TimeSeries.FIND_IMMEDIATELY_BEFORE) {
 		return await this.timeSeriesIndex.wrap((await this.persistenceIndex.get()).list, async (timeSeriesIndex) => {
 			// Look for the entry
-			const index = timeSeriesIndex.find(timestamp, TimeSeries.FIND_IMMEDIATELY_BEFORE);
-			// No entries, then create one or get the exisiting one
+			let index = timeSeriesIndex.find(timestamp, mode);
 			let metadata = null;
+
+			if (index != -1) {
+				metadata = timeSeriesIndex.data[index][1];
+				// If the index is found and the index is already full and the requested timestamp should be placed at the end of the file,
+				// then create a new file
+				if (forWrite && metadata.length >= this.options.maxEntriesPerFile && metadata.timestampEnd < timestamp) {
+					Log.info("Creating a new data file, current is full");
+					index = -1;
+				}
+				else {
+					timestamp = timeSeriesIndex.data[index][0];
+				}
+			}
+
+			// No entries, then create one
 			if (index == -1) {
 				Exception.assert(forWrite, "File does not exists for timestamp " + timestamp + " and not able to create one");
 				metadata = await this.createIndexEntry(timestamp);
 			}
-			else {
-				timestamp = timeSeriesIndex.data[index][0];
-				metadata = timeSeriesIndex.data[index][1];
-			}
+
 			return {
 				// The timestamp of the file (the one that can be retreived by the index)
 				timestamp: timestamp,
-				// The number of elements in the file
-				length: metadata.length,
 				// The path of the data file
 				path: metadata.path
 			}
