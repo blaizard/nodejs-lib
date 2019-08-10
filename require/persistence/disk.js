@@ -358,7 +358,7 @@ module.exports = class PersistenceDisk {
 	 * \param type The type of operation.
 	 */
 	async write(type, ...args) {
-		Exception.assert(this.options.operations.hasOwnProperty(type), "The operation \"" + type + "\" is not supported");
+		Exception.assert(this.options.operations.hasOwnProperty(type), () => ("The operation \"" + type + "\" is not supported, valid operations are: " + Object.keys(this.options.operations).join(", ")));
 
 		// This part has to be protected by a mutex in order to make this action atomical
 		await this.mutex.lock();
@@ -433,7 +433,7 @@ module.exports = class PersistenceDisk {
 			// Parse the data and apply it
 			const args = JSON.parse(argsStr);
 			Exception.assert(args instanceof Array, "The data must be an array");
-			Exception.assert(this.options.operations.hasOwnProperty(type), "The operation \"" + type + "\" is not supported");
+			Exception.assert(this.options.operations.hasOwnProperty(type), () => ("The operation \"" + type + "\" is not supported, valid operations are: " + Object.keys(this.options.operations).join(", ")));
 
 			// Apply the change
 			await this.options.operations[type](data, ...args);

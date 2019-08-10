@@ -4,9 +4,9 @@ const Log = require("./log.js")("timeseries");
 const Exception = require("./exception.js")("timeseries");
 
 /**
- * Implementation of a persistent time series
+ * Implementation of a time series
  */
-module.exports = class PersistenceTimeSeries {
+module.exports = class TimeSeries {
 	constructor(options) {
 		this.options = Object.assign({
 			/**
@@ -73,37 +73,38 @@ module.exports = class PersistenceTimeSeries {
 		return null;
 	}
 
+	static get FIND_EXACT_MACTH() { return 1; }
+	static get FIND_IMMEDIATELY_BEFORE() { return 2; }
+	static get FIND_IMMEDIATELY_AFTER() { return 3; }
+
 	/**
 	 * Find a specific timestamp by binary search.
-	 * If no exact match has been found, return the one after in time (timestamp higher).
-	 * Note it can return an index out of bound if the latest timestamp is too low.
+	 * If no exact match has been found, the rule can be set by the mode argument.
 	 */
-	find(timestamp) {
-		let indexStart = 0;
-		let indexEnd = this.data.length - 1;
+	find(timestamp, mode = TimeSeries.FIND_EXACT_MACTH) {
+		const index = this.find_(timestamp);
 
-		while (indexStart <= indexEnd) {
-			const indexCurrent = Math.floor((indexStart + indexEnd) / 2);
-			const timestampCurrent = this.data[indexCurrent][0];
-			if (timestampCurrent == timestamp) {
-				return indexCurrent;
-			}
-			else if (timestampCurrent < timestamp) {
-				indexStart = indexCurrent + 1;
-			}
-			else {
-				indexEnd = indexCurrent - 1;
-			}
+		if (typeof this.data[index] === "object" && this.data[index][0] == timestamp) {
+			return index;
 		}
 
-		return indexStart;
+		switch (mode) {
+		case TimeSeries.FIND_EXACT_MACTH:
+			return null;
+		case TimeSeries.FIND_IMMEDIATELY_BEFORE:
+			return index - 1;
+		case TimeSeries.FIND_IMMEDIATELY_AFTER:
+			return index;
+		default:
+			Exception.unreachable("Unsupported find mode: " + mode);
+		}
 	}
 
 	/**
 	 * Insert a new element to the series
 	 */
 	insert(timestamp, data) {
-		const index = this.find(timestamp);
+		const index = this.find_(timestamp);
 		// If the exact timestamp already exists
 		if (this.options.unique && index < this.data.length && this.data[index][0] == timestamp) {
 			const newData = this.options.uniqueMerge(this.data[index][1], data, timestamp);
@@ -137,7 +138,7 @@ module.exports = class PersistenceTimeSeries {
 			timestampEnd = this.data[this.data.length - 1][0];
 		}
 
-		let index = this.find(timestampStart);
+		let index = this.find_(timestampStart);
 		if (this.data[index][0] != timestampStart && inclusive == true && index > 0) {
 			--index;
 		}
@@ -150,7 +151,10 @@ module.exports = class PersistenceTimeSeries {
 				return;
 			}
 			prevTimestamp = this.data[index][0];
-			callback(prevTimestamp, this.data[index][1]);
+			const continueLoop = callback(prevTimestamp, this.data[index][1]);
+			if (continueLoop === false) {
+				break;
+			}
 		}
 	}
 
@@ -192,5 +196,33 @@ module.exports = class PersistenceTimeSeries {
 				this.data.splice(index, 1);
 			});
 		}
+	}
+
+	// ---- Private methods ---------------------------------------------------
+
+	/**
+	 * Find a specific timestamp by binary search.
+	 * If no exact match has been found, return the one after in time (timestamp higher).
+	 * Note it can return an index out of bound if the latest timestamp is too low.
+	 */
+	find_(timestamp) {
+		let indexStart = 0;
+		let indexEnd = this.data.length - 1;
+
+		while (indexStart <= indexEnd) {
+			const indexCurrent = Math.floor((indexStart + indexEnd) / 2);
+			const timestampCurrent = this.data[indexCurrent][0];
+			if (timestampCurrent == timestamp) {
+				return indexCurrent;
+			}
+			else if (timestampCurrent < timestamp) {
+				indexStart = indexCurrent + 1;
+			}
+			else {
+				indexEnd = indexCurrent - 1;
+			}
+		}
+
+		return indexStart;
 	}
 }

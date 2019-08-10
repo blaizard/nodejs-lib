@@ -225,7 +225,7 @@ module.exports = class Web {
 					await callback.call(this, request, response);
 				}
 				catch (e) {
-					Exception.print("Exception Guard", e);
+					Exception.print("Exception Guard", Exception.fromError(e));
 					response.status(500).send(e.message);
 				}
 			});

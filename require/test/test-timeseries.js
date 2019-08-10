@@ -53,13 +53,13 @@ describe("TimeSeries", () => {
 		for (let i=0; i<10; ++i) {
 			timeseries.insert(i, 0);
 		}
-		Exception.assertEqual(timeseries.find(0), 0, timeseries.data);
-		Exception.assertEqual(timeseries.find(9), 9, timeseries.data);
-		Exception.assertEqual(timeseries.find(-1), 0, timeseries.data);
-		Exception.assertEqual(timeseries.find(10), 10, timeseries.data);
-		Exception.assertEqual(timeseries.find(1.5), 2, timeseries.data);
-		Exception.assertEqual(timeseries.find(2.5), 3, timeseries.data);
-		Exception.assertEqual(timeseries.find(3.5), 4, timeseries.data);
+		Exception.assertEqual(timeseries.find_(0), 0, timeseries.data);
+		Exception.assertEqual(timeseries.find_(9), 9, timeseries.data);
+		Exception.assertEqual(timeseries.find_(-1), 0, timeseries.data);
+		Exception.assertEqual(timeseries.find_(10), 10, timeseries.data);
+		Exception.assertEqual(timeseries.find_(1.5), 2, timeseries.data);
+		Exception.assertEqual(timeseries.find_(2.5), 3, timeseries.data);
+		Exception.assertEqual(timeseries.find_(3.5), 4, timeseries.data);
 	});
 
 	describe("forEach", () => {

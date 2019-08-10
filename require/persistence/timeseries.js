@@ -82,8 +82,10 @@ module.exports = class PersistenceTimeSeries {
 	 * Insert a new data point
 	 */
 	async insert(timestamp, data) {
-		let persistence = await this.getPersistenceByTimestamp(timestamp);
-		await persistence.write("insert", timestamp, data);
+	
+		let result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/true);
+		await result.persistence.write("insert", timestamp, data);
+		await this.persistenceIndex.write("increaseLength", timestamp);
 	}
 
 	/**
@@ -99,11 +101,27 @@ module.exports = class PersistenceTimeSeries {
 	 */
 	async forEach(callback, timestampStart, timestampEnd, inclusive) {
 
+		const firstValidTimestamp = await this.getTimestamp(0);
+
+		// Means that there is no sample
+		if (firstValidTimestamp === null) {
+			return;
+		}
+
+		// Make sure the first timestamp is valid
 		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
-		let persistence = await this.getPersistenceByTimestamp(timestamp);
-		await this.timeSeriesData.wrap((await persistence.get()).list, (timeseries) => {
-			timeseries.forEach(callback, timestamp, timestampEnd, inclusive);
-		});
+		timestamp = Math.max(timestamp, await this.getTimestamp(0));
+
+		// Loop through the entries
+		do {
+			const result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/false);
+			const lastValidTimestamp = await this.timeSeriesData.wrap((await result.persistence.get()).list, (timeseries) => {
+				timeseries.forEach(callback, timestamp, timestampEnd, inclusive);
+				return timeseries.getTimestamp(-1);
+			});
+			// Check if it needs to continue
+			timestamp = (timestamp > lastValidTimestamp) ? (lastValidTimestamp + 1) : null;
+		} while (timestamp != null);
 	}
 
 	/**
@@ -117,9 +135,13 @@ module.exports = class PersistenceTimeSeries {
 	 * \return The timestamp or null if out of bound.
 	 */
 	async getTimestamp(index) {
-		let persistence = await this.getPersistenceByIndex(index);
-		return await this.timeSeriesData.wrap((await persistence.get()).list, (timeseries) => {
-			return timeseries.getTimestamp(index);
+		let result = await this.getPersistenceByIndex(index);
+		// Out of bound
+		if (result === null) {
+			return null;
+		}
+		return await this.timeSeriesData.wrap((await result.persistence.get()).list, (timeseries) => {
+			return timeseries.getTimestamp(result.index);
 		});
 	}
 
@@ -154,7 +176,7 @@ module.exports = class PersistenceTimeSeries {
 				let persistence = null;
 				try {
 					// Open the persistence
-					persistence = await new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/true));
+					persistence = await new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/true, this.timeSeriesData));
 					await persistence.waitReady();
 					// Read some metadata
 					let timestampBegin = Number.MAX_VALUE;
@@ -199,29 +221,45 @@ module.exports = class PersistenceTimeSeries {
 	getPersistenceOptions(readonly, timeSeries) {
 
 		let options = {
-			initial: {list:[]}
+			initial: {list:[]},
+			operations: {
+				insert: async (data, timestamp, value) => {
+					await timeSeries.wrap(data.list, (t) => {
+						t.insert(timestamp, value);
+					});
+				},
+				increaseLength: async (data, timestamp) => {
+					await timeSeries.wrap(data.list, (t) => {
+						const index = t.find(timestamp, TimeSeries.FIND_IMMEDIATELY_BEFORE);
+						Exception.assert(typeof t.data[index] == "object", () => ("Cannot find timestamp " + timestamp + " in index, returned index: " + index + " " + JSON.stringify(t.data)));
+						Exception.assert(t.data[index].hasOwnProperty("length"), "No length property for index entry " + index);
+						++(t.data[index].length);
+					});
+				}
+			}
 		};
 
 		if (readonly) {
 			return options;
 		}
 		return Object.assign(options, {
-			operations: {
-				insert: async (data, timestamp, value) => {
-					await timeSeries.wrap(data.list, (t) => {
-						t.insert(timestamp, value);
-					});
-				}
-			},
 			savepointTask: this.options.savepointTask
 		});
 	}
 
 	/**
 	 * Return and create if necessary the persistence associated with this timestamp
+	 * 
+	 * \param timestamp The timestamp associated with the persistence to be opened
+	 * \param forWrite Optional, Open the persistence for write (or create one if needed)
+	 * 
+	 * \return A structure containing the persistence and the metadata;
 	 */
-	async getPersistenceByTimestamp(timestamp) {
-		const metadata = await this.getMetadata(timestamp);
+	async getPersistenceByTimestamp(timestamp, forWrite = false) {
+		Exception.assert(typeof timestamp == "number", "Timestamp passed to getPersistenceByTimestamp is not a number: " + timestamp);
+
+		const metadata = await this.getMetadata(timestamp, forWrite);
+		Exception.assert(metadata, "Metadata returned for " + timestamp + " is evaluating to false");
 
 		// Load the persistence if not alreay loaded
 		if (!this.persistenceCache.hasOwnProperty(metadata.path)) {
@@ -239,16 +277,60 @@ module.exports = class PersistenceTimeSeries {
 		Exception.assert(this.persistenceCache[metadata.path] instanceof Persistence, "Persistence " + metadata.path + " is not of Persistence type");
 		Exception.assert(this.persistenceCache[metadata.path].isReady(), "Persistence " + metadata.path + " is not ready");
 
-		return this.persistenceCache[metadata.path];
+		return Object.assign({
+			persistence: this.persistenceCache[metadata.path]
+		}, metadata);
 	}
 
 	/**
 	 * \brief Get the persistence from a specific index
 	 * 
-	 * \todo fix!
+	 * \return A structure containing the persistence and the relative index
+	 * to this persistence or null if out of bound.
 	 */
 	async getPersistenceByIndex(index) {
-		return await this.getPersistenceByTimestamp(0);
+
+		let result = null;
+		if (index >= 0) {
+			// Loop through the index and count the element until index is reached
+			result = await this.timeSeriesIndex.wrap((await this.persistenceIndex.get()).list, async (timeSeriesIndex) => {
+				let indexLeft = index;
+				for (let i = 0; i < timeSeriesIndex.data.length; ++i) {
+					const entry = timeSeriesIndex.data[i];
+					if (indexLeft <= entry[1].length) {
+						return {
+							timestamp: entry[0],
+							index: indexLeft
+						}
+					}
+					indexLeft -= entry[1].length;
+				}
+			});
+		}
+		else {
+			// Loop through the index and count the element until index is reached
+			result = await this.timeSeriesIndex.wrap((await this.persistenceIndex.get()).list, async (timeSeriesIndex) => {
+				let indexLeft = -(index + 1);
+				for (let i = timeSeriesIndex.data.length - 1; i >= 0; --i) {
+					const entry = timeSeriesIndex.data[i];
+					if (indexLeft <= entry[1].length) {
+						return {
+							timestamp: entry[0],
+							index: -indexLeft - 1
+						}
+					}
+					indexLeft -= entry[1].length;
+				}
+			});
+		}
+
+		// Out of bound
+		if (result === undefined) {
+			return null;
+		}
+		return Object.assign({
+			index: result.index
+		}, await this.getPersistenceByTimestamp(result.timestamp, /*forWrite*/false));
 	}
 
 	/**
@@ -265,16 +347,36 @@ module.exports = class PersistenceTimeSeries {
 
 	/**
 	 * Get the current data file path for this timestamp
+	 * 
+	 * If no file exists, create a new if 'forWrite' is set.
+	 * 
+	 * \param timestamp The timestamp associated with the metadata the user wants to acquired.
+	 * \param forWrite If set, it will create a file if needed. If not set, it needs to ensure that the timestamp is valid.
+	 * 
+	 * \return The metadata including the timestamp of the file.
 	 */
-	async getMetadata(timestamp) {
+	async getMetadata(timestamp, forWrite) {
 		return await this.timeSeriesIndex.wrap((await this.persistenceIndex.get()).list, async (timeSeriesIndex) => {
 			// Look for the entry
-			const index = timeSeriesIndex.find(timestamp) - 1;
+			const index = timeSeriesIndex.find(timestamp, TimeSeries.FIND_IMMEDIATELY_BEFORE);
 			// No entries, then create one or get the exisiting one
-			const metadata = (index == -1) ? await this.createIndexEntry(timestamp) : timeSeriesIndex.data[index];
-			return Object.assign(metadata, {
-				timestamp: timestamp
-			});
+			let metadata = null;
+			if (index == -1) {
+				Exception.assert(forWrite, "File does not exists for timestamp " + timestamp + " and not able to create one");
+				metadata = await this.createIndexEntry(timestamp);
+			}
+			else {
+				timestamp = timeSeriesIndex.data[index][0];
+				metadata = timeSeriesIndex.data[index][1];
+			}
+			return {
+				// The timestamp of the file (the one that can be retreived by the index)
+				timestamp: timestamp,
+				// The number of elements in the file
+				length: metadata.length,
+				// The path of the data file
+				path: metadata.path
+			}
 		});
 	}
 }
