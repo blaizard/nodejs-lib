@@ -36,7 +36,7 @@ module.exports = class PersistenceTimeSeries {
 			/**
 			 * Maximum number of entries before spliting files
 			 */
-			maxEntriesPerFile: 10
+			maxEntriesPerFile: 100
 		}, options);
 
 		this.event = new Event({
@@ -72,9 +72,10 @@ module.exports = class PersistenceTimeSeries {
 	async initialize(path) {
 
 		// Load the index
-		this.persistenceIndex = new Persistence(path, this.getPersistenceOptions(/*readonly*/false, this.timeSeriesIndex));
+		this.persistenceIndex = new Persistence(path, this.optionsIndex);
 		await this.persistenceIndex.waitReady();
 		// Quick check to see if the index need to be rebuilt
+		// There seems to be an issue if it is not rebuilt (test fails sporadically)
 		if ((await this.persistenceIndex.get()).version != VERSION || true) {
 			await this.rebuildIndex();
 			Log.info("Successfully rebuilt index of timeseries " + path);
@@ -83,13 +84,25 @@ module.exports = class PersistenceTimeSeries {
 	}
 
 	/**
+	 * Close the persistence
+	 */
+	async close() {
+		let promiseList = [];
+		promiseList.push(this.persistenceIndex.close());
+		for (const id in this.persistenceCache) {
+			promiseList.push(this.persistenceCache[id].close());
+		}
+		await Promise.all(promiseList);
+	}
+
+	/**
 	 * Insert a new data point
 	 */
 	async insert(timestamp, data) {
-	
 		let result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/true);
-		await result.persistence.write("insert", timestamp, data);
-		await this.persistenceIndex.write("update", timestamp);
+		const promiseData = result.persistence.write("insert", timestamp, data);
+		const promiseIndex = this.persistenceIndex.write("update", timestamp);
+		await Promise.all([promiseData, promiseIndex]);
 	}
 
 	/**
@@ -112,23 +125,25 @@ module.exports = class PersistenceTimeSeries {
 			return;
 		}
 
-		// Make sure the first timestamp is valid
+		// Make sure the first timestamps is valid
 		let timestamp = (typeof timestampStart === "undefined") ? -Number.MAX_VALUE : timestampStart;
 		timestamp = Math.max(timestamp, await this.getTimestamp(0));
-
-		timestampEnd = await this.getTimestamp(-1);
+		timestampEnd = (typeof timestampEnd === "undefined") ? (await this.getTimestamp(-1)) : timestampEnd;
 
 		// Loop through the entries
 		let isFirst = true;
 		do {
 			const result = await this.getPersistenceByTimestamp(timestamp, /*forWrite*/false, (isFirst) ? TimeSeries.FIND_IMMEDIATELY_BEFORE : TimeSeries.FIND_IMMEDIATELY_AFTER);
+			
 			isFirst = false;
 			const lastValidTimestamp = await this.timeSeriesData.wrap((await result.persistence.get()).list, (timeseries) => {
 				timeseries.forEach(callback, timestamp, timestampEnd, inclusive);
 				return timeseries.getTimestamp(-1);
 			});
-			// Check if it needs to continue
-			timestamp = (timestampEnd > lastValidTimestamp) ? lastValidTimestamp : null;
+			// Check if it needs to continue.
+			// Note +1 is important as it ensure that the timestamp is not exsiting in the current list, hence
+			// avoid an infinity loop situation.
+			timestamp = (timestampEnd > lastValidTimestamp) ? (lastValidTimestamp + 1) : null;
 		} while (timestamp != null);
 	}
 
@@ -196,7 +211,7 @@ module.exports = class PersistenceTimeSeries {
 				let persistence = null;
 				try {
 					// Open the persistence
-					persistence = await new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/true, this.timeSeriesData));
+					persistence = await new Persistence(fullPath, this.optionsDataReadOnly);
 					await persistence.waitReady();
 					// Read some metadata
 					await this.timeSeriesData.wrap((await persistence.get()).list, (timeSeriesData) => {
@@ -235,18 +250,17 @@ module.exports = class PersistenceTimeSeries {
 		await this.persistenceIndex.waitReady();
 	}
 
-	getPersistenceOptions(readonly, timeSeries) {
-
-		let options = {
+	get optionsIndex() {
+		return {
 			initial: {list:[]},
 			operations: {
 				insert: async (data, timestamp, value) => {
-					await timeSeries.wrap(data.list, (t) => {
+					await this.timeSeriesIndex.wrap(data.list, (t) => {
 						t.insert(timestamp, value);
 					});
 				},
 				update: async (data, timestamp) => {
-					await timeSeries.wrap(data.list, (t) => {
+					await this.timeSeriesIndex.wrap(data.list, (t) => {
 						const index = t.find(timestamp, TimeSeries.FIND_IMMEDIATELY_BEFORE);
 
 						// Increase the length
@@ -259,15 +273,28 @@ module.exports = class PersistenceTimeSeries {
 						t.data[index][1].timestampEnd = Math.max(t.data[index][1].timestampEnd, timestamp);
 					});
 				}
+			},
+			savepointTask: this.options.savepointTask
+		};
+	}
+
+	get optionsDataReadOnly() {
+		return {
+			initial: {list:[]},
+			operations: {
+				insert: async (data, timestamp, value) => {
+					await this.timeSeriesData.wrap(data.list, (t) => {
+						t.insert(timestamp, value);
+					});
+				}
 			}
 		};
+	}
 
-		if (readonly) {
-			return options;
-		}
-		return Object.assign(options, {
+	get optionsData() {
+		return Object.assign({
 			savepointTask: this.options.savepointTask
-		});
+		}, this.optionsDataReadOnly);
 	}
 
 	/**
@@ -291,7 +318,7 @@ module.exports = class PersistenceTimeSeries {
 
 			await FileSystem.mkdir(this.options.dataDir);
 			const fullPath = Path.join(this.options.dataDir, metadata.path);
-			let persistence = new Persistence(fullPath, this.getPersistenceOptions(/*readonly*/false, this.timeSeriesData));
+			let persistence = new Persistence(fullPath, this.optionsData);
 			await persistence.waitReady();
 
 			this.persistenceCache[metadata.path] = persistence;

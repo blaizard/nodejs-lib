@@ -383,13 +383,13 @@ module.exports = class PersistenceDisk {
 				fileSize = 0;
 			}
 
+			// Pre-read the current data, it is important to do it before writing to the delta file,
+			// otherwise data will be append twice.
+			await this.get();
+
 			// Add the action to the delta file, make sure it fits on a single line
 			data = JSON.stringify(args).replace(/(?:\r\n|\r|\n)/g, " ");
-
 			await this.fileSystemExec("appendFile", deltaPath, type + " " + data + "\n");
-
-			// Pre-read the current data
-			await this.get();
 
 			// Update the current object
 			try {
