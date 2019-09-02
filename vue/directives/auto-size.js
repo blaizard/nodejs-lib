@@ -60,7 +60,7 @@ function autoResize(el) {
 			fontSize = Math.floor((maxFontSize + minFontSize) / 2);
 
 			// console.log(uid + "; max: [" + rectParent.width + "px, " + rectParent.height + "px], size: [" + rect.width + "px, " + rect.height + "px], font: [" + minFontSize + "px, " + maxFontSize + "px]");
-		// The difference is not an integer, therefore we must check the upper limit (hence the >=2 and not > 1)
+			// The difference is not an integer, therefore we must check the upper limit (hence the >=2 and not > 1)
 		} while (Math.abs(maxFontSize - minFontSize) >= 2);
 
 		el.style.fontSize = minFontSize + "px";

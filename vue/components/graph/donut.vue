@@ -25,7 +25,7 @@
 			Element
 		},
 		props: {
-			value: {type: Array, required: false, default: []},
+			value: {type: Array, required: false, default: () => []},
 			text: {type: String | Number, required: false, default: false}
 		},
 		directives: {
@@ -67,7 +67,6 @@
 					circumferenceList[indexMax] -= diffCircumference;
 					console.log("valueStyles", circumferenceList.reduce((sum, n) => sum + n, 0), circumference);
 				}
-
 
 				let curOffset = 0;
 				return circumferenceList.map((circumferenceCovered) => {

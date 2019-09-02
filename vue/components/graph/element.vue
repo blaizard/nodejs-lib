@@ -24,7 +24,7 @@
 	export default {
 		props: {
 			name: {type: String, required: true},
-			value: {type: Array, required: true},
+			value: {type: Array, required: false, default: () => []},
 			selected: {type: Number, required: false, default: -1}
 		},
 		directives: {
