@@ -16,17 +16,23 @@
 			}
 
 			.irgraph-plot-items {
-				@each $color in $irgraphColors {
-					$i: index($irgraphColors, $color);
-					&:nth-child(#{$i}) {
-						.circle {
-							stroke: $color;
-							stroke-width: 8px;
-							stroke-linecap: round;
-							cursor: pointer;
+				.irgraph-plot-item {
+					@each $color in $irgraphColors {
+						$i: index($irgraphColors, $color);
+						&:nth-child(#{$i}) {
+							.circle {
+								stroke: $color;
+								stroke-width: 8px;
+								stroke-linecap: round;
+								cursor: pointer;
 
-							&:hover {
-								stroke-width: 12px;
+								&:hover {
+									stroke-width: 12px;
+								}
+							}
+							.path {
+								stroke: $color;
+								stroke-width: 2px;
 							}
 						}
 					}
