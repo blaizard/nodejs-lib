@@ -30,10 +30,10 @@
 				<g v-for="item in series" class="irgraph-plot-item">
 					<path :d="item.path" class="path" fill="transparent" />
 					<line v-for="data in item.coords"
-							:x1="data.x"
-							:y1="data.y"
-							:x2="data.x"
-							:y2="data.y"
+							:x1="data[0]"
+							:y1="data[1]"
+							:x2="data[0]"
+							:y2="data[1]"
 							class="circle" />
 				</g>
 			</g>
@@ -49,12 +49,14 @@
 	import HoverChildren from "./directive/hover-children.js"
 	import Resize from "[lib]/vue/directives/resize.js"
 
+	const DEBUG = true;
+
 	export default {
 		components: {
 			Element
 		},
 		props: {
-			value: {type: Object, required: false, default: () => ({})},
+			value: {type: Array, required: false, default: () => ([])},
 			text: {type: String | Number, required: false, default: false},
 			minY: {type: Number, required: false, default: null},
 			maxY: {type: Number, required: false, default: null},
@@ -81,9 +83,6 @@
 				tickSize: 5,
 				tickXMinOffset: 100,
 				tickYMinOffset: 100,
-				nbPoints: 0,
-				valueXDefaultStart: 0,
-				valueXDefaultIncrement: 1,
 				maxPointsPerPlot: 20
 			}
 		},
@@ -91,38 +90,30 @@
 			value: {
 				immediate: true,
 				handler(value) {
-					this.nbPoints = 0;
+
+					if (DEBUG) console.time("plot render")
+
 					this.valuesMinY = Number.MAX_SAFE_INTEGER;
 					this.valuesMaxY = -Number.MAX_SAFE_INTEGER;
 
-					// Calculate the [valuesMinY; valuesMaxY] and nbPoints
-					const series = value.series || [];
+					const series = value || [];
+
+					// Calculate the [valuesMinY; valuesMaxY]
 					series.forEach((item) => {
-						item.values.forEach((y) => {
-							this.valuesMinY = Math.min(this.valuesMinY, y);
-							this.valuesMaxY = Math.max(this.valuesMaxY, y);
+						item.values.forEach((point) => {
+							this.valuesMinY = Math.min(this.valuesMinY, point[1]);
+							this.valuesMaxY = Math.max(this.valuesMaxY, point[1]);
 						});
-						this.nbPoints = Math.max(this.nbPoints, item.values.length);
 					});
 
 					// Calculate the [valuesMinX; valuesMaxX]
-					if (this.nbValuesX) {
-						this.valuesMinX = Number.MAX_SAFE_INTEGER;
-						this.valuesMaxX = -Number.MAX_SAFE_INTEGER;
-						for (let i = 0; i<this.nbValuesX; ++i) {
-							this.valuesMinX = Math.min(this.valuesMinX, this.valuesX[i]);
-							this.valuesMaxX = Math.max(this.valuesMaxX, this.valuesX[i]);
-						}
-						this.valueXDefaultIncrement = (this.nbValuesX > 1) ? ((this.valuesMaxX - this.valuesMinX) / (this.nbValuesX - 1)) : 1;
-						this.valueXDefaultStart = this.valuesMaxX + this.valueXDefaultIncrement;
-					}
-					else {
-						this.valuesMinX = 0;
-						this.valuesMaxX = -1;
-						this.valueXDefaultIncrement = 1;
-						this.valueXDefaultStart = 0;
-					}
-					this.valuesMaxX += this.valueXDefaultIncrement * (this.nbPoints - this.nbValuesX);
+					this.valuesMinX = Number.MAX_SAFE_INTEGER;
+					this.valuesMaxX = -Number.MAX_SAFE_INTEGER;
+
+					series.forEach((item) => {
+						this.valuesMinX = Math.min(this.valuesMinX, item.values[0][0]);
+						this.valuesMaxX = Math.max(this.valuesMaxX, item.values[item.values.length - 1][0]);
+					});
 				}
 			}
 		},
@@ -157,7 +148,7 @@
 			plotMinY() {
 				if (this.minY === null) {
 					// Note here the plotMaxY and valuesMinY are on purpose
-					return ((this.plotMaxY - this.valuesMinY) > this.valuesMinY) ? 0 : this.valuesMinY;
+					return ((this.plotMaxY - this.valuesMinY) > this.valuesMinY) ? Math.min(0, this.valuesMinY) : this.valuesMinY;
 				}
 				return this.minY;
 			},
@@ -183,7 +174,7 @@
 			 * The points to be processed
 			 */
 			series() {
-				return (this.value.series || []).map((item) => {
+				const series = (this.value || []).map((item) => {
 
 					let serie = {
 						caption: item.caption || "",
@@ -192,14 +183,26 @@
 						path: ""
 					};
 
+					const valuesXRatio = 1. / (this.plotMaxX - this.plotMinX) * this.plotWidth;
+					const valuesXOffset = this.plotOffsetLeft - this.plotMinX * valuesXRatio;
+
+					const valuesYRatio = -1. / (this.plotMaxY - this.plotMinY) * this.plotHeight;
+					const valuesYOffset = this.plotOffsetTop + this.plotHeight - this.plotMinY * valuesYRatio;
+
+					// Prevent no-sense
+					if (valuesXRatio == Infinity || valuesYRatio == Infinity) {
+						return [];
+					}
+
+					// Display only a maximum number of entries to imprve performance
+					const maxEntries = 100;
+					const inc = Math.max(1, item.values.length / maxEntries);
+
 					// Re-sample and calculate the series
-					for (let i=0; i<item.values.length; ++i) {
-						const x = this.plotOffsetLeft + this.valuesXMap[i];
-						const y = this.plotOffsetTop + this.plotHeight - (item.values[i] - this.plotMinY) * this.valuesYRatio;
-						serie.coords.push({
-							x: x,
-							y: y
-						});
+					for (let i=0; i<item.values.length; i += inc) {
+						const x = valuesXOffset + item.values[~~i][0] * valuesXRatio;
+						const y = valuesYOffset + item.values[~~i][1] * valuesYRatio;
+						serie.coords.push([x, y]);
 
 						// Calculate the path
 						if (i == 0)
@@ -214,6 +217,8 @@
 					}
 					return serie;
 				});
+				if (DEBUG) console.timeEnd("plot render");
+				return series;
 			},
 			// X Label
 			labelX() {
@@ -249,24 +254,6 @@
 				});
 				return map;
 			},
-			valuesX() {
-				return this.value.x || [];
-			},
-			nbValuesX() {
-				return Math.min(this.nbPoints, this.valuesX.length);
-			},
-			valuesXMap() {
-				let list = [];
-				const ratio = 1. / (this.plotMaxX - this.plotMinX) * this.plotWidth;
-				let index = 0;
-				for (; index < this.nbValuesX; ++index) {
-					list.push((this.valuesX[index] - this.plotMinX) * ratio);
-				}
-				for (let x = this.valueXDefaultStart; index < this.nbPoints; ++index, x += this.valueXDefaultIncrement) {
-					list.push((x - this.plotMinX) * ratio);
-				}
-				return list;
-			},
 			// Y Label
 			labelY() {
 				let maxNbTicks = Math.floor(this.plotHeight / this.tickYMinOffset);
@@ -300,9 +287,6 @@
 					};
 				});
 				return map;
-			},
-			valuesYRatio() {
-				return 1. / (this.plotMaxY - this.plotMinY) * this.plotHeight;
 			}
 		},
 		methods: {
