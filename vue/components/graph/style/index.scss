@@ -9,51 +9,39 @@ $irgraphDefaultColor: #ff6347;
 /**
  * Layout
  */
+
+$font-size: 16;
+
 .irgraph {
 	display: flex;
 	flex-flow: row nowrap;
-	font-size: 16px;
+	font-size: #{$font-size}px;
 	line-height: 1.5em;
+	width: 100%;
+	height: 100%;
 
 	/**
-	 * Style & layout for the content
+	 * Style & layout for the content and legend
 	 */
-	.irgraph-content {
-		width: 60%;
-		height: 100%;
-		text-align: center;
+	> * {
+
 		padding: 0;
+		margin: 0;
+		height: 100%;
 		white-space: nowrap;
-
-		&:before {
-			content: "";
-			display: inline-block;
-			height: 100%;
-			vertical-align: middle;
-		}
-
-		> * {
-			vertical-align: middle;
-		}
 	}
 
 	/**
-	 * Style & layout for the content
+	 * Hise an element, used to measure some text dimensions
 	 */
-	.irgraph-legend {
-
-		width: 40%;
-		height: 100%;
+	.irgraph-hide {
+		display: inline-block;
 		padding: 0;
-		white-space: nowrap;
+		margin: 0;
+		opacity: 0;
+	}
 
-		&:before {
-			content: "";
-			display: inline-block;
-			height: 100%;
-			vertical-align: middle;
-		}
-
+	.irgraph-legend {
 		.irgraph-legend-items {
 			display: inline-block;
 			padding-left: 20px;
@@ -87,6 +75,29 @@ $irgraphDefaultColor: #ff6347;
 					}
 				}
 			}
+		}
+	}
+
+	// Layouts
+
+	/**
+	 * legend-right
+	 */
+	&.irgraph-layout-legend-right {
+		.irgraph-content {
+			flex: 1;
+			overflow: hidden;
+		}
+	}
+
+	/**
+	 * legend-left
+	 */
+	 &.irgraph-layout-legend-left {
+		flex-direction: row-reverse;
+		.irgraph-content {
+			flex: 1;
+			overflow: hidden;
 		}
 	}
 }

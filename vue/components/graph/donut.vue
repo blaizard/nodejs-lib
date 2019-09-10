@@ -65,7 +65,6 @@
 					// Need to adjust the circumferenceList by removing diffCircumference points
 					const indexMax = circumferenceList.indexOf(Math.max(...circumferenceList));
 					circumferenceList[indexMax] -= diffCircumference;
-					console.log("valueStyles", circumferenceList.reduce((sum, n) => sum + n, 0), circumference);
 				}
 
 				let curOffset = 0;

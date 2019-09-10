@@ -1,18 +1,21 @@
 .irgraph-plot {
 	.irgraph-plot-content {
-		width: 50%;
-		svg {
-			width: 100%;
-			height: 100%;
 
+		svg {
 			.irgraph-plot-grid-x,
 			.irgraph-plot-grid-y,
 			.irgraph-plot-labels-x,
 			.irgraph-plot-labels-y {
-				stroke: #999;
+				stroke: #aaa;
 				stroke-dasharray: 0;
 				stroke-width: 1;
 				font-size: 12px;
+			}
+
+			.irgraph-plot-cursor {
+				stroke: #222;
+				stroke-dasharray: 1 1;
+				stroke-width: 1;
 			}
 
 			.irgraph-plot-items {
