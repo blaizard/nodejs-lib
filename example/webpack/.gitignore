@@ -1,0 +1,11 @@
+.dist/
+npm-debug.log
+
+# Git
+~*
+*.orig
+*.back
+
+# NodeJs
+node_modules/
+package-lock.json

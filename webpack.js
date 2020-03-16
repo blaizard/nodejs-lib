@@ -408,16 +408,36 @@ function getWebpackConfigDefault(isDev, config)
 							 * Path of the template to be used
 							 */
 							template: null,
+							/**
+							 * Content of the template to be used if not template is specified
+							 */
+							templateContent: "<!DOCTYPE html>"
+									+ "<html>"
+										+ "<head>"
+											+ "<meta charset=\"utf-8\" />"
+											+ "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
+											+ "<base href=\"<% html.base %>\" />"
+											+ "<% html.css %>"
+										+ "</head>"
+										+ "<body>"
+											+ "<div id=\"app\"></div>"
+											+ "<% html.js %>"
+										+ "</body>"
+									+ "</html>"
 						}, config.templates[i]);
 
 						// Update the path
 						configTemplate.output = pathResolve(config, configTemplate.output);
-						configTemplate.template = pathResolve(config, configTemplate.template);
 
 						try {
-							// Sanity check
-							Exception.assert(configTemplate.template, "Template is not set");
-							const data = await readFileAsync(configTemplate.template);
+
+							let data = configTemplate.templateContent;
+							if (configTemplate.template) {
+								configTemplate.template = pathResolve(config, configTemplate.template);
+								data = await readFileAsync(configTemplate.template);
+							}
+							Exception.assert(data, "No content specified for the template");
+
 							const template = new Template(data);
 
 							// Pre-process HTML specific entries
@@ -427,7 +447,7 @@ function getWebpackConfigDefault(isDev, config)
 								const cssList = (manifest.common.css || []).concat(manifest.entries[configTemplate.entryId].css || []);
 								const jsList = (manifest.common.js || []).concat(manifest.entries[configTemplate.entryId].js || []);
 								html = {
-									base: manifest.path.split("/").filter((entry) => (entry && entry != "/")).map((entry) => "..").join("/"),
+									base: manifest.path.split("/").filter((entry) => (entry && entry != "/")).map((entry) => "..").join("/") || "/",
 									css: cssList.map((path) => ("<link href=\"" + manifest.path + path + "\" rel=\"stylesheet\"/>")).join(""),
 									js: jsList.map((path) => ("<script src=\"" + manifest.path + path + "\"></script>")).join("")
 								}

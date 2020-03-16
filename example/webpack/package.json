@@ -1,0 +1,41 @@
+{
+	"description": "Famille",
+	"repository": "https://github.com/blaizard/nodejs-lib.git",
+	"license": "UNLICENSED",
+	"dependencies": {
+		"express": "latest",
+		"express-minify": "latest",
+		"multer": "latest",
+		"compression": "latest",
+		"helmet": "latest",
+		"npm": "latest",
+		"vue": "latest",
+		"@vue/composition-api": "latest"
+	},
+	"devDependencies": {
+		"@babel/core": "latest",
+		"@babel/plugin-transform-runtime": "latest",
+		"@babel/preset-env": "latest",
+		"babel-loader": "latest",
+		"babel-plugin-syntax-dynamic-import": "latest",
+		"css-loader": "latest",
+		"file-loader": "latest",
+		"mini-css-extract-plugin": "latest",
+		"node-sass": "latest",
+		"sass-loader": "latest",
+		"vue-loader": "latest",
+		"vue-style-loader": "latest",
+		"vue-template-compiler": "latest",
+		"webpack": "latest",
+		"webpack-assets-manifest": "latest",
+		"webpack-bundle-analyzer": "latest",
+		"webpack-cli": "latest",
+		"webpack-dev-server": "latest"
+	},
+	"scripts": {
+		"backend": "node backend/index.js",
+		"frontend-prod": "webpack --mode=production --config frontend/webpack.config.js",
+		"frontend-dev": "webpack --config frontend/webpack.config.js",
+		"frontend-dev-hmr": "webpack-dev-server --hot --config frontend/webpack.config.js"
+	}
+}
