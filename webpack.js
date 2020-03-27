@@ -227,7 +227,7 @@ class Webpack {
 
 			// Select dev or prod mode
 			const isDev = (argv.mode != "production");
-			Log.info("Building webpack for " + ((isDev) ? "development" : "production") + ((config.hmr) ? " with hmr enabled" : "") + ": " + config.output);
+			Log.info("Building with webpack for " + ((isDev) ? "development" : "production") + ((config.hmr) ? " with hmr enabled" : "") + ": " + config.output);
 
 			// Setup the webpack config increment
 			let webpackConfig = Webpack.merge(getWebpackConfigDefault(isDev, config), {
@@ -236,7 +236,8 @@ class Webpack {
 					path: config.output
 				},
 				resolve: {
-					alias: config.alias
+					alias: config.alias,
+					symlinks: false
 				}
 			});
 
