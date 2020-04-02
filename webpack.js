@@ -79,9 +79,10 @@ class Webpack {
 				js: []
 			},
 			/**
-			 * Output path of the generated content
+			 * Output path of the generated content.
+			 * If unset, this option must be defined with the CLI via --output-path
 			 */
-			output: Path.resolve(__dirname, "..", "dist"),
+			output: null,
 			/**
 			 * The url where the resource should be fetched by the client
 			 */
@@ -172,7 +173,6 @@ class Webpack {
 					? config.assets[key].map((path) => pathResolve(config, path))
 					: pathResolve(config, config.assets[key]);
 		});
-		config.output = pathResolve(config, config.output);
 
 		// ---- Handle extra config -------------------------------------------
 		let webpackExtraConfig = {};
@@ -221,6 +221,12 @@ class Webpack {
 
 		// ---- Build webpack config ------------------------------------------
 		return (env, argv) => {
+
+			// Set the output path
+			config.output = (config.output) ? config.output : argv["outputPath"];
+			Exception.assert(config.output, "Output path must be set.");
+			config.output = pathResolve(config, config.output);
+
 			// If hot reloading is enabled, set a flag in the config in order to prevent some expensive operations
 			config["hmr"] = (argv.hasOwnProperty("hot") && argv.hot) ? true : false;
 			config["hmrCounter"] = 0;
